@@ -82,6 +82,7 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
+import { useArgs } from "../../context/args"
 
 addDefaultParsers(parsers.parsers)
 
@@ -193,6 +194,7 @@ export function Session() {
   const kv = useKV()
   const { theme } = useTheme()
   const promptRef = usePromptRef()
+  const args = useArgs()
   const session = createMemo(() => sync.session.get(route.sessionID))
   const location = createMemo(() => {
     const current = session()
@@ -275,6 +277,89 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+  let prompt: PromptRef | undefined
+
+  let voiceMode: Promise<import("@opencode-ai/voxcode").VoiceMode> | undefined
+  let voiceBusy = false
+  const voice = () => {
+    if (!voiceMode) voiceMode = import("@opencode-ai/voxcode").then((module) => module.createVoiceMode())
+    return voiceMode
+  }
+  const voiceError = (error: unknown) => {
+    toast.show({ message: `Voice mode: ${errorMessage(error)}`, variant: "error", duration: 7000 })
+  }
+  const listenForPrompt = async () => {
+    if (!args.voice || voiceBusy || !prompt || questions().length > 0 || permissions().length > 0) return
+    voiceBusy = true
+    try {
+      const transcript = await (await voice()).listen()
+      if (!transcript || !prompt || questions().length > 0 || permissions().length > 0) return
+      prompt.set({ input: transcript, parts: [] })
+      prompt.submit()
+    } catch (error) {
+      voiceError(error)
+    } finally {
+      voiceBusy = false
+    }
+  }
+
+  if (args.voice) {
+    const spoken = new Set<string>()
+    event.on("message.updated", (evt) => {
+      const message = evt.properties.info
+      if (message.sessionID !== route.sessionID || message.role !== "assistant" || !message.time.completed) return
+      if (spoken.has(message.id)) return
+      spoken.add(message.id)
+      setTimeout(() => {
+        const text = (sync.data.part[message.id] ?? [])
+          .filter((part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored)
+          .map((part) => part.text)
+          .join("\n")
+        if (!text) return void listenForPrompt()
+        voiceBusy = true
+        void voice()
+          .then((mode) => mode.speak(text))
+          .then(() => {
+            voiceBusy = false
+            return listenForPrompt()
+          })
+          .catch((error) => {
+            voiceBusy = false
+            voiceError(error)
+          })
+      }, 0)
+    })
+
+    event.on("question.asked", (evt) => {
+      if (evt.properties.sessionID !== route.sessionID || voiceBusy) return
+      voiceBusy = true
+      void (async () => {
+        const mode = await voice()
+        const answers = []
+        const { resolveQuestionAnswer } = await import("@opencode-ai/voxcode")
+        for (const question of evt.properties.questions) {
+          const labels = question.options.map((option) => option.label)
+          await mode.speak(
+            `${question.question}. ${labels.map((label, index) => `Option ${index + 1}: ${label}`).join(". ")}`,
+          )
+          answers.push([resolveQuestionAnswer(await mode.listen(), labels)])
+        }
+        await sdk.client.question.reply({
+          requestID: evt.properties.id,
+          directory: session()?.directory,
+          answers,
+        })
+      })()
+        .catch(voiceError)
+        .finally(() => {
+          voiceBusy = false
+        })
+    })
+
+    onCleanup(() => {
+      if (voiceMode) void voiceMode.then((mode) => mode.dispose())
+    })
+  }
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -335,10 +420,12 @@ export function Session() {
 
   let seeded = false
   let scroll: ScrollBoxRenderable
-  let prompt: PromptRef | undefined
   const bind = (r: PromptRef | undefined) => {
     prompt = r
     promptRef.set(r)
+    if (args.voice && r && !args.continue && !args.sessionID && !route.prompt && messages().length === 0) {
+      setTimeout(() => void listenForPrompt(), 0)
+    }
     if (seeded || !route.prompt || !r) return
     seeded = true
     r.set(route.prompt)
@@ -1313,7 +1400,14 @@ export function Session() {
                         toBottom()
                       }}
                       sessionID={route.sessionID}
-                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                      right={
+                        <box flexDirection="row" gap={1}>
+                          <Show when={args.voice}>
+                            <text fg={theme.textMuted}>(voice mode)</text>
+                          </Show>
+                          <pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />
+                        </box>
+                      }
                     />
                   </pluginRuntime.Slot>
                 </Show>

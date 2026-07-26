@@ -125,6 +125,11 @@ export const TuiThreadCommand = cmd({
         describe: "start the minimal interactive interface",
         default: false,
       })
+      .option("voice", {
+        type: "boolean",
+        describe: "enable local hands-free voice input and output",
+        default: false,
+      })
       .option("replay", {
         type: "boolean",
         hidden: true,
@@ -150,6 +155,11 @@ export const TuiThreadCommand = cmd({
     const noReplay = args.replay === false || args.noReplay === true
 
     if (args.mini) {
+      if (args.voice) {
+        UI.error("--voice is not supported with --mini")
+        process.exitCode = 1
+        return
+      }
       const network = ["--port", "--hostname", "--mdns", "--no-mdns", "--mdns-domain", "--cors"].find((option) =>
         process.argv.some((arg) => arg === option || arg.startsWith(option + "=")),
       )
@@ -292,6 +302,7 @@ export const TuiThreadCommand = cmd({
               prompt,
               fork: args.fork,
               auto: args.auto || args.yolo || args["dangerously-skip-permissions"],
+              voice: args.voice,
             },
           }),
         )
