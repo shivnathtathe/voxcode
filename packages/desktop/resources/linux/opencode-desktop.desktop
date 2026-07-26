@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=OpenCode
+Name=VoxCode
 Exec=/opt/OpenCode/ai.opencode.desktop %U
 Terminal=false
 Type=Application
 Icon=ai.opencode.desktop
 StartupWMClass=ai.opencode.desktop
 NoDisplay=true
-Comment=Open source AI coding agent
+Comment=VoxCode voice-first AI coding agent
 Categories=Development;

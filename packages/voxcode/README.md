@@ -1,29 +1,25 @@
 # Voxcode voice mode
 
-`opencode --voice` adds local speech input and output to the full TUI. It uses Kokoro for text-to-speech, whisper.cpp for transcription, and FFmpeg for recording and playback. No audio or text is sent to a voice service.
+`opencode --voice` adds local speech input and output to the full TUI. It uses Kokoro for text-to-speech, sherpa-onnx Zipformer for live transcription, and FFmpeg for microphone capture. No audio or text is sent to a voice service.
 
 ## Setup
 
-1. Install FFmpeg and ensure `ffmpeg` and `ffplay` are on `PATH`.
-2. Install whisper.cpp and ensure `whisper-cli` is on `PATH`.
-3. Download a whisper.cpp model, such as `ggml-base.en.bin`.
-4. Set `VOXCODE_WHISPER_MODEL` to the model's absolute path.
-5. On Windows, set `VOXCODE_MIC_DEVICE` to the microphone name shown by `ffmpeg -list_devices true -f dshow -i dummy`.
-6. Run `opencode --voice`.
+Run `opencode --voice`. No additional installation or environment variables are required.
 
-Kokoro downloads its open model weights on first use and caches them locally.
+On first use, voice mode shows a setup message while it downloads the open Zipformer and Kokoro model weights. Models are cached in the platform user cache directory. The sherpa-onnx native runtime and an FFmpeg fallback are distributed with the package.
+
+Speech is decoded while you talk. Partial words appear directly in the terminal prompt, and the prompt is finalized after trailing silence without a separate transcription phase.
+
+Voice mode automatically selects the first available microphone on Windows and macOS. Linux uses the default PulseAudio/PipeWire source with an ALSA fallback. The operating system may ask for microphone permission on first use.
 
 ## Configuration
 
-| Variable                  | Purpose                                | Default                               |
-| ------------------------- | -------------------------------------- | ------------------------------------- |
-| `VOXCODE_WHISPER_MODEL`   | Absolute path to the whisper.cpp model | Required                              |
-| `VOXCODE_WHISPER_COMMAND` | whisper.cpp executable                 | `whisper-cli`                         |
-| `VOXCODE_MIC_DEVICE`      | FFmpeg input device                    | Platform default except Windows       |
-| `VOXCODE_LISTEN_SECONDS`  | Length of each recording               | `8`                                   |
-| `VOXCODE_KOKORO_MODEL`    | Kokoro model ID or local path          | `onnx-community/Kokoro-82M-v1.0-ONNX` |
-| `VOXCODE_KOKORO_VOICE`    | Kokoro voice                           | `af_heart`                            |
-| `VOXCODE_FFMPEG`          | FFmpeg executable                      | `ffmpeg`                              |
-| `VOXCODE_FFPLAY`          | FFplay executable                      | `ffplay`                              |
-
-Linux recording uses PulseAudio's `default` source. macOS recording uses AVFoundation device `:0`. Override either with `VOXCODE_MIC_DEVICE` when needed.
+| Variable                 | Purpose                            | Default                               |
+| ------------------------ | ---------------------------------- | ------------------------------------- |
+| `VOXCODE_MIC_DEVICE`       | Override the detected FFmpeg input       | Automatically detected                |
+| `VOXCODE_LISTEN_SECONDS`   | Maximum duration of one spoken prompt    | `30`                                  |
+| `VOXCODE_NO_SPEECH_MS`     | Retry delay when no speech is detected   | `5000`                                |
+| `VOXCODE_SILENCE_THRESHOLD`| PCM speech-energy threshold              | `500`                                 |
+| `VOXCODE_STT_MODEL`        | Directory containing Zipformer files     | Platform voice cache                   |
+| `VOXCODE_KOKORO_MODEL`     | Kokoro model ID or local path            | `onnx-community/Kokoro-82M-v1.0-ONNX` |
+| `VOXCODE_KOKORO_VOICE`     | Kokoro voice                             | `af_heart`                            |

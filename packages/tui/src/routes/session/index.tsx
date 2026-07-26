@@ -83,6 +83,7 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap 
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
 import { useArgs } from "../../context/args"
+import { useInteractionMode } from "../../context/interaction-mode"
 
 addDefaultParsers(parsers.parsers)
 
@@ -195,6 +196,7 @@ export function Session() {
   const { theme } = useTheme()
   const promptRef = usePromptRef()
   const args = useArgs()
+  const interaction = useInteractionMode()
   const session = createMemo(() => sync.session.get(route.sessionID))
   const location = createMemo(() => {
     const current = session()
@@ -282,40 +284,62 @@ export function Session() {
   let voiceMode: Promise<import("@opencode-ai/voxcode").VoiceMode> | undefined
   let voiceBusy = false
   const voice = () => {
-    if (!voiceMode) voiceMode = import("@opencode-ai/voxcode").then((module) => module.createVoiceMode())
+    if (!voiceMode) {
+      voiceMode = import("@opencode-ai/voxcode").then((module) =>
+        module.createVoiceMode({ onStatus: (status) => interaction.setStatus(status) }),
+      )
+    }
     return voiceMode
   }
   const voiceError = (error: unknown) => {
+    interaction.setStatus()
     toast.show({ message: `Voice mode: ${errorMessage(error)}`, variant: "error", duration: 7000 })
   }
   const listenForPrompt = async () => {
-    if (!args.voice || voiceBusy || !prompt || questions().length > 0 || permissions().length > 0) return
+    if (interaction.mode !== "voice" || voiceBusy || !prompt || questions().length > 0 || permissions().length > 0)
+      return
     voiceBusy = true
+    let retry = false
     try {
-      const transcript = await (await voice()).listen()
-      if (!transcript || !prompt || questions().length > 0 || permissions().length > 0) return
+      const transcript = await (await voice()).listen((text) => prompt?.set({ input: text, parts: [] }))
+      if (!transcript) {
+        retry = interaction.mode === "voice"
+        return
+      }
+      if (interaction.mode !== "voice" || !prompt || questions().length > 0 || permissions().length > 0)
+        return
       prompt.set({ input: transcript, parts: [] })
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      if (interaction.mode !== "voice" || !prompt.current.input.trim()) return
       prompt.submit()
     } catch (error) {
       voiceError(error)
     } finally {
       voiceBusy = false
+      if (retry) setTimeout(() => void listenForPrompt(), 250)
     }
   }
 
-  if (args.voice) {
+  {
+    createEffect(() => {
+      if (interaction.mode !== "voice") return
+      void voice()
+        .then((mode) => mode.ready())
+        .catch(voiceError)
+    })
     const spoken = new Set<string>()
-    event.on("message.updated", (evt) => {
-      const message = evt.properties.info
-      if (message.sessionID !== route.sessionID || message.role !== "assistant" || !message.time.completed) return
+    createEffect(() => {
+      if (interaction.mode !== "voice") return
+      const message = messages().findLast((item) => item.role === "assistant" && item.time.completed)
+      if (!message) return
       if (spoken.has(message.id)) return
+      const text = (sync.data.part[message.id] ?? [])
+        .filter((part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored)
+        .map((part) => part.text)
+        .join("\n")
+      if (!text) return
       spoken.add(message.id)
       setTimeout(() => {
-        const text = (sync.data.part[message.id] ?? [])
-          .filter((part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored)
-          .map((part) => part.text)
-          .join("\n")
-        if (!text) return void listenForPrompt()
         voiceBusy = true
         void voice()
           .then((mode) => mode.speak(text))
@@ -331,6 +355,7 @@ export function Session() {
     })
 
     event.on("question.asked", (evt) => {
+      if (interaction.mode !== "voice") return
       if (evt.properties.sessionID !== route.sessionID || voiceBusy) return
       voiceBusy = true
       void (async () => {
@@ -423,7 +448,14 @@ export function Session() {
   const bind = (r: PromptRef | undefined) => {
     prompt = r
     promptRef.set(r)
-    if (args.voice && r && !args.continue && !args.sessionID && !route.prompt && messages().length === 0) {
+    if (
+      interaction.mode === "voice" &&
+      r &&
+      !args.continue &&
+      !args.sessionID &&
+      !route.prompt &&
+      messages().length === 0
+    ) {
       setTimeout(() => void listenForPrompt(), 0)
     }
     if (seeded || !route.prompt || !r) return
@@ -1400,14 +1432,7 @@ export function Session() {
                         toBottom()
                       }}
                       sessionID={route.sessionID}
-                      right={
-                        <box flexDirection="row" gap={1}>
-                          <Show when={args.voice}>
-                            <text fg={theme.textMuted}>(voice mode)</text>
-                          </Show>
-                          <pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />
-                        </box>
-                      }
+                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />
                   </pluginRuntime.Slot>
                 </Show>

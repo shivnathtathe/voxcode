@@ -57,6 +57,7 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { useInteractionMode } from "../../context/interaction-mode"
 
 registerOpencodeSpinner()
 
@@ -148,6 +149,7 @@ export function Prompt(props: PromptProps) {
   const leader = useLeaderActive()
   const local = useLocal()
   const args = useArgs()
+  const interaction = useInteractionMode()
   const paths = useTuiPaths()
   const location = useLocation()
   const terminalEnvironment = useTuiTerminalEnvironment()
@@ -1467,6 +1469,10 @@ export function Prompt(props: PromptProps) {
                               </span>
                             </text>
                           </Show>
+                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                            {interaction.mode === "voice" ? (interaction.status ?? "Voice") : "Text"}
+                          </text>
                         </box>
                       </Show>
                     </>
